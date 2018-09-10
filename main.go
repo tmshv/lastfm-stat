@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/middleware"
 	"strings"
 	"sort"
+	"time"
 )
 
 var apiKey string
@@ -70,6 +71,7 @@ type Lastfm struct {
 }
 
 type Scan struct {
+	RunTimestamp       int
 	MaxRecordTimestamp int
 	RecordsFound       int
 	Username           string
@@ -84,6 +86,18 @@ type Record struct {
 	ArtistMbid    string
 	Date          string
 	DateTimestamp int
+}
+
+type MbidEntity struct {
+	Name string `json:"name"`
+	Mbid string `json:"mbid"`
+}
+
+type RecordRest struct {
+	Track     MbidEntity `json:"track"`
+	Album     MbidEntity `json:"album"`
+	Artist    MbidEntity `json:"artist"`
+	Timestamp int        `json:"ts"`
 }
 
 type SystemStatus struct {
@@ -416,7 +430,25 @@ func getSystemStatus() (*SystemStatus, error) {
 	return status, nil
 }
 
-func getUserRecords(username string) (*[]Record, error) {
+func (record *Record) toRestRecord() *RecordRest {
+	return &RecordRest{
+		Timestamp: record.DateTimestamp,
+		Track: MbidEntity{
+			Name: record.Track,
+			Mbid: record.TrackMbid,
+		},
+		Album: MbidEntity{
+			Name: record.Album,
+			Mbid: record.AlbumMbid,
+		},
+		Artist: MbidEntity{
+			Name: record.Artist,
+			Mbid: record.ArtistMbid,
+		},
+	}
+}
+
+func getUserRecords(username string) (*[]RecordRest, error) {
 	db, err := openDb()
 	defer db.Close()
 
@@ -434,7 +466,13 @@ func getUserRecords(username string) (*[]Record, error) {
 		return records[i].DateTimestamp > records[j].DateTimestamp
 	})
 
-	return &records, nil
+	restRecords := make([]RecordRest, 0)
+
+	for _, record := range records {
+		restRecords = append(restRecords, *record.toRestRecord())
+	}
+
+	return &restRecords, nil
 }
 
 func getUserScan(username string) (*Scan, error) {
@@ -487,28 +525,12 @@ func runUser(username string) {
 
 	records := lastfm.scan()
 	scan := getScanInfo(records)
+	scan.RunTimestamp = int(time.Now().Unix())
 	scan.Username = username
 
 	if scan.RecordsFound != 0 {
 		store.SetLastScan(username, scan)
 		store.UpdateRecords(username, records)
-	}
-
-	fmt.Println(*lastScan)
-	fmt.Println(*scan)
-
-	for _, record := range *records {
-		//	//fmt.Println("Page:", lastfm.lastLoadedPage)
-		//	//fmt.Println("Total pages:", lastfm.TotalPages)
-		//	//fmt.Println("Records found:", len(pageRecords))
-		//
-		//	//for _, record := range pageRecords {
-		//	//	fmt.Println(record)
-		//	//}
-		//
-		//	//fmt.Println("")
-		//
-		fmt.Println(record)
 	}
 }
 
@@ -566,17 +588,37 @@ func handleUserStatus(c echo.Context) error {
 
 	out := make(map[string]interface{})
 	out["lastScanRecordsFound"] = scan.RecordsFound
+	out["lastScanTimestamp"] = scan.RunTimestamp
 	out["lastScanMaxRecordTimestamp"] = scan.MaxRecordTimestamp
 
 	return c.JSON(http.StatusOK, out)
 }
 
+func runSyncLoop() {
+	for {
+		status, err := getSystemStatus()
+		if err != nil {
+			return
+		}
+
+		for _, username := range status.Users {
+			fmt.Println("Update", username)
+
+			runUser(username)
+		}
+
+		time.Sleep(10 * time.Second)
+	}
+}
+
 func main() {
-	//period := 10000
 	apiKey = "e8162414f5faf07f1958ee934709cc9d"
 
-	//startServer(":8000")
+	go runSyncLoop()
+	startServer(":8000")
+	//go runSyncLoop()
+	//go runSyncLoop()
 
-	username := "mrpoma"
-	runUser(username)
+	//username := "mrpoma"
+	//runUser(username)
 }
