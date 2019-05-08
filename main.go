@@ -10,10 +10,11 @@ import (
 	"github.com/boltdb/bolt"
 	"log"
 	"github.com/labstack/echo"
-	"github.com/labstack/echo/middleware"
 	"strings"
-	"sort"
 	"time"
+	"errors"
+	"sort"
+	"github.com/labstack/echo/middleware"
 )
 
 var apiKey string
@@ -77,6 +78,10 @@ type Scan struct {
 	Username           string
 }
 
+type SystemInfo struct {
+	Users []string `json:"users"`
+}
+
 type Record struct {
 	Track         string
 	TrackMbid     string
@@ -98,10 +103,6 @@ type RecordRest struct {
 	Album     MbidEntity `json:"album"`
 	Artist    MbidEntity `json:"artist"`
 	Timestamp int        `json:"ts"`
-}
-
-type SystemStatus struct {
-	Users []string `json:"users"`
 }
 
 func hasRecordsOlderThan(records *[]Record, ts int) bool {
@@ -267,6 +268,83 @@ func (store *Store) GetUsers() *[]string {
 	return &users
 }
 
+func (store *Store) AddUser(username string) {
+	info := store.GetSystemInfo()
+
+	info.Users = append(info.Users, username)
+
+	store.UpdateSystemInfo(info)
+}
+
+func (store *Store) UpdateSystemInfo(info *SystemInfo) error {
+	bucketName := []byte("system")
+
+	err := store.db.Update(func(tx *bolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists(bucketName)
+
+		if err != nil {
+			return nil
+		}
+
+		key := []byte("info")
+		infoData, err := json.Marshal(info)
+
+		err = bucket.Put(key, infoData)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (store *Store) GetSystemInfo() *SystemInfo {
+	bucketName := []byte("system")
+
+	var info SystemInfo
+
+	err := store.db.Update(func(tx *bolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists(bucketName)
+
+		if err != nil {
+			return nil
+		}
+
+		key := []byte("info")
+		value := bucket.Get(key)
+
+		if value != nil {
+			json.Unmarshal(value, &info)
+
+			return nil
+		}
+
+		info = SystemInfo{
+			Users: make([]string, 0),
+		}
+		infoData, err := json.Marshal(info)
+
+		err = bucket.Put(key, infoData)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil
+	}
+
+	return &info
+}
+
 func (store *Store) GetRecords(username string) *[]Record {
 	bucketName := store.getUserBucketName(username)
 
@@ -410,7 +488,7 @@ func getScanInfo(records *[]Record) *Scan {
 	}
 }
 
-func getSystemStatus() (*SystemStatus, error) {
+func getSystemInfo() (*SystemInfo, error) {
 	db, err := openDb()
 	defer db.Close()
 
@@ -422,12 +500,34 @@ func getSystemStatus() (*SystemStatus, error) {
 		db: db,
 	}
 
-	users := store.GetUsers()
-	status := &SystemStatus{
-		Users: *users,
+	info := store.GetSystemInfo()
+
+	return info, nil
+}
+
+func addUser(username string) error {
+	db, err := openDb()
+	defer db.Close()
+
+	if err != nil {
+		return err
 	}
 
-	return status, nil
+	store := Store{
+		db: db,
+	}
+
+	info := store.GetSystemInfo()
+
+	for _, u := range info.Users {
+		if u == username {
+			return errors.New("user exist")
+		}
+	}
+
+	store.AddUser(username)
+
+	return nil
 }
 
 func (record *Record) toRestRecord() *RecordRest {
@@ -546,6 +646,7 @@ func startServer(address string) {
 	e.GET("/status", handleStatus)
 	e.GET("/user/:username/records", handleUserRecords)
 	e.GET("/user/:username/status", handleUserStatus)
+	e.POST("/user/:username", handleAddUser)
 
 	// Start server
 	e.Logger.Fatal(e.Start(address))
@@ -558,8 +659,23 @@ func getErrorMessage(message string) interface{} {
 	return m
 }
 
+func handleAddUser(c echo.Context) error {
+	username := c.Param("username")
+
+	err := addUser(username)
+
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, getErrorMessage(err.Error()))
+	}
+
+	m := make(map[string]string)
+	m["username"] = username
+
+	return c.JSON(http.StatusOK, m)
+}
+
 func handleStatus(c echo.Context) error {
-	status, err := getSystemStatus()
+	status, err := getSystemInfo()
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, getErrorMessage("Cannon get status"))
 	}
@@ -586,22 +702,25 @@ func handleUserStatus(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, getErrorMessage("Cannot get user status"))
 	}
 
+	records, err := getUserRecords(username)
+
 	out := make(map[string]interface{})
 	out["lastScanRecordsFound"] = scan.RecordsFound
 	out["lastScanTimestamp"] = scan.RunTimestamp
 	out["lastScanMaxRecordTimestamp"] = scan.MaxRecordTimestamp
+	out["totalRecords"] = len(*records)
 
 	return c.JSON(http.StatusOK, out)
 }
 
 func runSyncLoop() {
 	for {
-		status, err := getSystemStatus()
+		info, err := getSystemInfo()
 		if err != nil {
 			return
 		}
 
-		for _, username := range status.Users {
+		for _, username := range info.Users {
 			fmt.Println("Update", username)
 
 			runUser(username)
