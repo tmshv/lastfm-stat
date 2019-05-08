@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -18,7 +19,13 @@ import (
 	"github.com/labstack/echo/middleware"
 )
 
-var apiKey string
+type Config struct {
+	UpdateDelay int
+	Port        string
+	ApiKey      string
+}
+
+var config *Config
 
 type LastfmRecentTracksResponse struct {
 	RecentTracks struct {
@@ -591,11 +598,7 @@ func getUserScan(username string) (*Scan, error) {
 	return store.GetLastScan(username), nil
 }
 
-func runUser(username string) {
-	context := &LastfmContext{
-		User:   username,
-		ApiKey: apiKey,
-	}
+func runUser(context *LastfmContext) {
 	db, err := openDb()
 	defer db.Close()
 
@@ -607,7 +610,7 @@ func runUser(username string) {
 		db: db,
 	}
 
-	lastScan := store.GetLastScan(username)
+	lastScan := store.GetLastScan(context.User)
 
 	var until int
 	if lastScan == nil {
@@ -627,11 +630,11 @@ func runUser(username string) {
 	records := lastfm.scan()
 	scan := getScanInfo(records)
 	scan.RunTimestamp = int(time.Now().Unix())
-	scan.Username = username
+	scan.Username = context.User
 
 	if scan.RecordsFound != 0 {
-		store.SetLastScan(username, scan)
-		store.UpdateRecords(username, records)
+		store.SetLastScan(context.User, scan)
+		store.UpdateRecords(context.User, records)
 	}
 }
 
@@ -715,6 +718,8 @@ func handleUserStatus(c echo.Context) error {
 }
 
 func runSyncLoop() {
+	sec := time.Duration(config.UpdateDelay) * time.Second
+
 	for {
 		info, err := getSystemInfo()
 		if err != nil {
@@ -724,21 +729,35 @@ func runSyncLoop() {
 		for _, username := range info.Users {
 			fmt.Println("Update", username)
 
-			runUser(username)
+			context := &LastfmContext{
+				User:   username,
+				ApiKey: config.ApiKey,
+			}
+			runUser(context)
 		}
 
-		time.Sleep(10 * time.Second)
+		time.Sleep(sec)
 	}
 }
 
+func processFlags() *Config {
+	cfg := &Config{}
+
+	flag.StringVar(&cfg.Port, "port", ":80", "HTTP listen port")
+	flag.StringVar(&cfg.ApiKey, "key", "", "Last.fm API Key")
+	flag.IntVar(&cfg.UpdateDelay, "delay", 60, "Sleep delay")
+	flag.Parse()
+
+	return cfg
+}
+
 func main() {
-	apiKey = "e8162414f5faf07f1958ee934709cc9d"
+	config = processFlags()
+
+	if config.ApiKey == "" {
+		return
+	}
 
 	go runSyncLoop()
-	startServer(":8000")
-	//go runSyncLoop()
-	//go runSyncLoop()
-
-	//username := "mrpoma"
-	//runUser(username)
+	startServer(config.Port)
 }
