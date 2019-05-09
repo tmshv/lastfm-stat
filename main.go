@@ -612,14 +612,10 @@ func runUser(context *LastfmContext) {
 
 	lastScan := store.GetLastScan(context.User)
 
-	var until int
-	if lastScan == nil {
-		until = 1536005795
-	} else {
+	until := 0
+	if lastScan != nil {
 		until = lastScan.MaxRecordTimestamp
 	}
-
-	//until = 1536005795
 
 	lastfm := Lastfm{
 		context:              context,
