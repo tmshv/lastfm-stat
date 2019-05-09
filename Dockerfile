@@ -8,8 +8,10 @@ RUN go build -o app
 # app
 FROM alpine
 WORKDIR /srv
+RUN mkdir /data
 EXPOSE 80
 ENV KEY="1"
 ENV DELAY=10
+ENV DB="/data/stat.db"
 COPY --from=build /src/app ./
 ENTRYPOINT ["/srv/app"]
