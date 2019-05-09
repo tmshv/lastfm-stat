@@ -23,6 +23,7 @@ type Config struct {
 	UpdateDelay int
 	Port        string
 	ApiKey      string
+	BoltPath    string
 }
 
 var config *Config
@@ -473,7 +474,7 @@ func (store *Store) SetLastScan(username string, scan *Scan) error {
 }
 
 func openDb() (*bolt.DB, error) {
-	db, err := bolt.Open("stat.db", 0600, nil)
+	db, err := bolt.Open(config.BoltPath, 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -743,6 +744,7 @@ func processFlags() *Config {
 
 	flag.StringVar(&cfg.Port, "port", ":80", "HTTP listen port")
 	flag.StringVar(&cfg.ApiKey, "key", "", "Last.fm API Key")
+	flag.StringVar(&cfg.BoltPath, "db", "stat.db", "Bolt db location")
 	flag.IntVar(&cfg.UpdateDelay, "delay", 60, "Sleep delay")
 	flag.Parse()
 
