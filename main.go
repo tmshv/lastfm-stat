@@ -719,11 +719,12 @@ func runSyncLoop() {
 	for {
 		info, err := getSystemInfo()
 		if err != nil {
+			log.Println("Sys info fail. Skip")
 			return
 		}
 
 		for _, username := range info.Users {
-			fmt.Println("Update", username)
+			log.Println("Update", username)
 
 			context := &LastfmContext{
 				User:   username,
@@ -732,6 +733,7 @@ func runSyncLoop() {
 			runUser(context)
 		}
 
+		log.Println("Sleep", sec, len(info.Users))
 		time.Sleep(sec)
 	}
 }
