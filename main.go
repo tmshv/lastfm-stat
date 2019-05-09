@@ -754,6 +754,8 @@ func processFlags() *Config {
 func main() {
 	config = processFlags()
 
+	log.Printf("Bolt DB path %v", config.BoltPath)
+
 	if config.ApiKey == "" {
 		log.Fatal("Lastfm API key is required")
 	}
