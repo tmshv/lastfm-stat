@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -17,6 +16,7 @@ import (
 	"github.com/boltdb/bolt"
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
+	"github.com/namsral/flag"
 )
 
 type Config struct {
