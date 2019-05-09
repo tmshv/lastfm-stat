@@ -755,7 +755,7 @@ func main() {
 	config = processFlags()
 
 	if config.ApiKey == "" {
-		return
+		log.Fatal("Lastfm API key is required")
 	}
 
 	go runSyncLoop()
